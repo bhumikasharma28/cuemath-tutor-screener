@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { ScreenerSession, StartSessionRequest, SendMessageRequest } from '../types';
 import {
@@ -11,7 +11,7 @@ import {
 const router = Router();
 const sessions = new Map<string, ScreenerSession>();
 
-router.post('/start', async (req: Request, res: Response) => {
+router.post('/start', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { tutorProfile } = req.body as StartSessionRequest;
 
@@ -21,7 +21,10 @@ router.post('/start', async (req: Request, res: Response) => {
 
     const sessionId = uuidv4();
     const firstUserMessage = `Hi! I'm ${tutorProfile.name} and I'm ready to start the Cuemath tutor screening.`;
+
+    console.log(`[sessions/start] Starting session for ${tutorProfile.email}`);
     const initialMessage = await getInitialMessage(tutorProfile);
+    console.log(`[sessions/start] Got initial message, sessionId=${sessionId}`);
 
     const session: ScreenerSession = {
       id: sessionId,
@@ -35,18 +38,14 @@ router.post('/start', async (req: Request, res: Response) => {
     };
 
     sessions.set(sessionId, session);
-
-    return res.json({
-      sessionId,
-      message: initialMessage,
-    });
-  } catch (error) {
-    console.error('Error starting session:', error);
-    return res.status(500).json({ error: 'Failed to start screening session' });
+    return res.json({ sessionId, message: initialMessage });
+  } catch (err) {
+    console.error('[sessions/start] Error:', err);
+    next(err);
   }
 });
 
-router.post('/:sessionId/message', async (req: Request, res: Response) => {
+router.post('/:sessionId/message', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = req.params['sessionId'] as string;
     const { message } = req.body as SendMessageRequest;
@@ -69,7 +68,10 @@ router.post('/:sessionId/message', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     });
 
+    console.log(`[sessions/message] sessionId=${sessionId}, calling OpenRouter`);
     const rawResponse = await continueConversation(session.tutorProfile, session.messages);
+    console.log(`[sessions/message] sessionId=${sessionId}, got response`);
+
     const evaluation = parseEvaluation(rawResponse);
     const displayMessage = evaluation ? stripEvaluationBlock(rawResponse) : rawResponse;
 
@@ -90,30 +92,40 @@ router.post('/:sessionId/message', async (req: Request, res: Response) => {
       isComplete: session.isComplete,
       evaluation: session.evaluation,
     });
-  } catch (error) {
-    console.error('Error processing message:', error);
-    return res.status(500).json({ error: 'Failed to process message' });
+  } catch (err) {
+    console.error(`[sessions/message] Error for sessionId=${req.params['sessionId']}:`, err);
+    next(err);
   }
 });
 
-router.get('/:sessionId', (req: Request, res: Response) => {
-  const session = sessions.get(req.params['sessionId'] as string);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-  return res.json(session);
+router.get('/:sessionId', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const session = sessions.get(req.params['sessionId'] as string);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    return res.json(session);
+  } catch (err) {
+    console.error(`[sessions/get] Error:`, err);
+    next(err);
+  }
 });
 
-router.get('/', (_req: Request, res: Response) => {
-  const list = Array.from(sessions.values()).map((s) => ({
-    id: s.id,
-    tutorName: s.tutorProfile.name,
-    email: s.tutorProfile.email,
-    isComplete: s.isComplete,
-    recommendation: s.evaluation?.recommendation,
-    overallScore: s.evaluation?.scores.overall,
-    createdAt: s.createdAt,
-    completedAt: s.completedAt,
-  }));
-  return res.json(list);
+router.get('/', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const list = Array.from(sessions.values()).map((s) => ({
+      id: s.id,
+      tutorName: s.tutorProfile.name,
+      email: s.tutorProfile.email,
+      isComplete: s.isComplete,
+      recommendation: s.evaluation?.recommendation,
+      overallScore: s.evaluation?.scores.overall,
+      createdAt: s.createdAt,
+      completedAt: s.completedAt,
+    }));
+    return res.json(list);
+  } catch (err) {
+    console.error('[sessions/list] Error:', err);
+    next(err);
+  }
 });
 
 export default router;
