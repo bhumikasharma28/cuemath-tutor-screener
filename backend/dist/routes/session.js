@@ -5,7 +5,7 @@ const uuid_1 = require("uuid");
 const openrouter_1 = require("../services/openrouter");
 const router = (0, express_1.Router)();
 const sessions = new Map();
-router.post('/start', async (req, res) => {
+router.post('/start', async (req, res, next) => {
     try {
         const { tutorProfile } = req.body;
         if (!tutorProfile?.name || !tutorProfile?.email) {
@@ -13,7 +13,9 @@ router.post('/start', async (req, res) => {
         }
         const sessionId = (0, uuid_1.v4)();
         const firstUserMessage = `Hi! I'm ${tutorProfile.name} and I'm ready to start the Cuemath tutor screening.`;
+        console.log(`[sessions/start] Starting session for ${tutorProfile.email}`);
         const initialMessage = await (0, openrouter_1.getInitialMessage)(tutorProfile);
+        console.log(`[sessions/start] Got initial message, sessionId=${sessionId}`);
         const session = {
             id: sessionId,
             tutorProfile,
@@ -25,17 +27,14 @@ router.post('/start', async (req, res) => {
             createdAt: new Date().toISOString(),
         };
         sessions.set(sessionId, session);
-        return res.json({
-            sessionId,
-            message: initialMessage,
-        });
+        return res.json({ sessionId, message: initialMessage });
     }
-    catch (error) {
-        console.error('Error starting session:', error);
-        return res.status(500).json({ error: 'Failed to start screening session' });
+    catch (err) {
+        console.error('[sessions/start] Error:', err);
+        next(err);
     }
 });
-router.post('/:sessionId/message', async (req, res) => {
+router.post('/:sessionId/message', async (req, res, next) => {
     try {
         const sessionId = req.params['sessionId'];
         const { message } = req.body;
@@ -54,7 +53,9 @@ router.post('/:sessionId/message', async (req, res) => {
             content: message.trim(),
             timestamp: new Date().toISOString(),
         });
+        console.log(`[sessions/message] sessionId=${sessionId}, calling OpenRouter`);
         const rawResponse = await (0, openrouter_1.continueConversation)(session.tutorProfile, session.messages);
+        console.log(`[sessions/message] sessionId=${sessionId}, got response`);
         const evaluation = (0, openrouter_1.parseEvaluation)(rawResponse);
         const displayMessage = evaluation ? (0, openrouter_1.stripEvaluationBlock)(rawResponse) : rawResponse;
         session.messages.push({
@@ -73,28 +74,40 @@ router.post('/:sessionId/message', async (req, res) => {
             evaluation: session.evaluation,
         });
     }
-    catch (error) {
-        console.error('Error processing message:', error);
-        return res.status(500).json({ error: 'Failed to process message' });
+    catch (err) {
+        console.error(`[sessions/message] Error for sessionId=${req.params['sessionId']}:`, err);
+        next(err);
     }
 });
-router.get('/:sessionId', (req, res) => {
-    const session = sessions.get(req.params['sessionId']);
-    if (!session)
-        return res.status(404).json({ error: 'Session not found' });
-    return res.json(session);
+router.get('/:sessionId', (req, res, next) => {
+    try {
+        const session = sessions.get(req.params['sessionId']);
+        if (!session)
+            return res.status(404).json({ error: 'Session not found' });
+        return res.json(session);
+    }
+    catch (err) {
+        console.error(`[sessions/get] Error:`, err);
+        next(err);
+    }
 });
-router.get('/', (_req, res) => {
-    const list = Array.from(sessions.values()).map((s) => ({
-        id: s.id,
-        tutorName: s.tutorProfile.name,
-        email: s.tutorProfile.email,
-        isComplete: s.isComplete,
-        recommendation: s.evaluation?.recommendation,
-        overallScore: s.evaluation?.scores.overall,
-        createdAt: s.createdAt,
-        completedAt: s.completedAt,
-    }));
-    return res.json(list);
+router.get('/', (_req, res, next) => {
+    try {
+        const list = Array.from(sessions.values()).map((s) => ({
+            id: s.id,
+            tutorName: s.tutorProfile.name,
+            email: s.tutorProfile.email,
+            isComplete: s.isComplete,
+            recommendation: s.evaluation?.recommendation,
+            overallScore: s.evaluation?.scores.overall,
+            createdAt: s.createdAt,
+            completedAt: s.completedAt,
+        }));
+        return res.json(list);
+    }
+    catch (err) {
+        console.error('[sessions/list] Error:', err);
+        next(err);
+    }
 });
 exports.default = router;

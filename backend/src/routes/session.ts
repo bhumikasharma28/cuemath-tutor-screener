@@ -41,6 +41,11 @@ router.post('/start', async (req: Request, res: Response, next: NextFunction) =>
     return res.json({ sessionId, message: initialMessage });
   } catch (err) {
     console.error('[sessions/start] Error:', err);
+    if (err instanceof Error) {
+      console.error('[sessions/start] Message:', err.message);
+      console.error('[sessions/start] Stack:', err.stack);
+    }
+    console.error('[sessions/start] OPENROUTER_API_KEY set:', !!process.env.OPENROUTER_API_KEY);
     next(err);
   }
 });
