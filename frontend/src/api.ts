@@ -1,6 +1,6 @@
 import { TutorProfile, EvaluationReport } from './types';
 
-const BASE = '/api';
+const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
 
 export async function startSession(tutorProfile: TutorProfile): Promise<{
   sessionId: string;
